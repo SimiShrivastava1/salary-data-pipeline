@@ -1,0 +1,25 @@
+development:
+  # Data paths
+  indeed_path: "/content/drive/MyDrive/Colab Notebooks/parquet_exports/indeed_us"
+  simplyhired_path: "/content/drive/MyDrive/Colab Notebooks/parquet_exports/simplyhired_us"
+  linkedin_path: "/content/drive/MyDrive/Colab Notebooks/parquet_exports/linkedin_us"
+  glassdoor_path: "/content/drive/MyDrive/glassdoor_soc_code_mapping.csv"
+  bls_path: "/content/drive/MyDrive/BLS_all_data_M_2024.csv"
+  output_dir: "/content/output"
+  
+  # Date range
+  start_date: "2025-06-01"
+  end_date: "2025-07-31"
+  
+  # Source configuration
+  enable_indeed: true
+  enable_simplyhired: true
+  enable_linkedin: false
+  enable_glassdoor: true
+  
+  # Processing parameters
+  salary_min: 15000.0
+  salary_max: 50000000.0
+  zscore_threshold: 3.0
+  max_chunk_size: 8
+  records_per_chunk: 150000
