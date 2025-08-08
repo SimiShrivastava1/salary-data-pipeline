@@ -30,7 +30,7 @@ def apply_source_weights(df):
 
 class OutlierDetector:
     """Statistical outlier detection for salary data"""
-    
+
     def __init__(self, config: PipelineConfig, logger: Logger):
         self.config = config
         self.logger = logger
@@ -43,7 +43,7 @@ class OutlierDetector:
             log_salaries = np.log(df['salary_annual'])
             mean_log, std_log = log_salaries.mean(), log_salaries.std()
             z_scores = (log_salaries - mean_log).abs() / std_log
-            
+
             outlier_mask = z_scores > z_threshold
             outlier_indices = df.index[outlier_mask].tolist()
 
@@ -175,7 +175,7 @@ class OutlierDetector:
                         categories['no_bls_match'] += 1
                     else:
                         p10, p90 = bls_match.iloc[0]['bls_p10'], bls_match.iloc[0]['bls_p90']
-                        
+
                         if pd.isna(p10) or pd.isna(p90):
                             categories['no_bls_match'] += 1
                         elif salary < p10:

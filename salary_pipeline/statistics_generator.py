@@ -9,15 +9,15 @@ from config import PipelineConfig
 
 class StatisticsGenerator:
     """Generate clean dataset and streamlined statistics"""
-    
+
     def __init__(self, config: PipelineConfig, logger: Logger):
         self.config = config
         self.logger = logger
 
-    def generate_clean_dataset_and_stats(self, df: pd.DataFrame, outlier_indices: List[int], 
+    def generate_clean_dataset_and_stats(self, df: pd.DataFrame, outlier_indices: List[int],
                                         bls_results: Dict) -> Dict[str, Any]:
         """Generate clean dataset by removing outliers and create statistics"""
-        
+
         os.makedirs(self.config.output_dir, exist_ok=True)
 
         # Determine outliers to remove based on BLS validation
@@ -25,7 +25,7 @@ class StatisticsGenerator:
 
         # Create clean dataset
         clean_df = df[~df.index.isin(legitimate_outlier_indices)].copy()
-        
+
         original_count = len(df)
         clean_count = len(clean_df)
         removed_count = len(legitimate_outlier_indices)
@@ -35,7 +35,7 @@ class StatisticsGenerator:
 
         # Generate streamlined statistics
         stats_df = self._generate_statistics(clean_df)
-        
+
         if stats_df is None:
             self.logger.error("Statistics generation failed")
             return None
@@ -80,7 +80,7 @@ class StatisticsGenerator:
 
     def _generate_statistics(self, clean_df: pd.DataFrame) -> pd.DataFrame:
         """Generate streamlined salary statistics by groupings"""
-        
+
         grouping_columns = ['job_title_normalized', 'city', 'state', 'seniority_level']
         available_cols = [col for col in grouping_columns if col in clean_df.columns]
 
@@ -115,7 +115,7 @@ class StatisticsGenerator:
                 std_salary = salaries.std()
                 std_error = std_salary / np.sqrt(n)
                 margin_error = 1.96 * std_error if n >= 30 else 2.045 * std_error
-                
+
                 ci_lower = max(0, stats_dict['mean_salary'] - margin_error)
                 ci_upper = stats_dict['mean_salary'] + margin_error
                 stats_dict['mean_salary_95ci'] = f"${ci_lower:,.0f} - ${ci_upper:,.0f}"
@@ -131,7 +131,7 @@ class StatisticsGenerator:
                 count = source_counts.get(source, 0)
                 if count > 0:
                     data_sources.append(f"{source}({count})")
-            
+
             stats_dict['data_sources'] = '; '.join(data_sources) if data_sources else 'Unknown'
 
             stats_list.append(stats_dict)
@@ -153,15 +153,15 @@ class StatisticsGenerator:
 
         # Streamlined client statistics - ONLY requested columns
         client_columns = [
-            'job_title_normalized', 'city', 'state', 'seniority_level', 
-            'record_count', 'mean_salary', 'median_salary', 
+            'job_title_normalized', 'city', 'state', 'seniority_level',
+            'record_count', 'mean_salary', 'median_salary',
             'mean_salary_95ci', 'sample_confidence', 'data_sources'
         ]
-        
+
         # Filter to only include available columns
         available_client_cols = [col for col in client_columns if col in stats_df.columns]
         client_stats_df = stats_df[available_client_cols].copy()
-        
+
         client_stats_path = os.path.join(self.config.output_dir, "salary_statistics_granular.csv")
         client_stats_df.to_csv(client_stats_path, index=False)
         files_created.append(client_stats_path)

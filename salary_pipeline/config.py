@@ -6,7 +6,7 @@ from typing import List, Dict
 @dataclass
 class PipelineConfig:
     """Pipeline configuration management"""
-    
+
     # Date range
     start_date: str = "2025-06-01"
     end_date: str = "2025-07-31"
@@ -27,7 +27,7 @@ class PipelineConfig:
     # Source settings
     enable_indeed: bool = True
     enable_simplyhired: bool = True
-    enable_linkedin: bool = False
+    enable_linkedin: bool = True
     enable_glassdoor: bool = True
 
     # Parameters
@@ -44,7 +44,7 @@ class PipelineConfig:
             # TODO: INDUSTRY INTEGRATION - Current grouping levels ready for industry enhancement
             # When industry data becomes available, enhance these groupings to include industry dimension
             # This will enable more sophisticated outlier detection within industry contexts
-            
+
             self.grouping_levels = [
                 {
                     'name': 'most_granular',
@@ -115,31 +115,31 @@ class PipelineConfig:
         """Load configuration from YAML file"""
         if not os.path.exists(config_path):
             raise FileNotFoundError(f"Config file not found: {config_path}")
-        
+
         with open(config_path, 'r') as f:
             config_data = yaml.safe_load(f)
-        
+
         env = environment or os.getenv('ENVIRONMENT', 'development')
-        
+
         if env not in config_data:
             raise ValueError(f"Environment '{env}' not found in config file")
-        
+
         env_config = config_data[env]
         env_config['environment'] = env
-        
+
         return cls(**env_config)
 
     def validate(self):
         """Validate configuration"""
         errors = []
-        
+
         paths_to_check = ['indeed_path', 'simplyhired_path', 'glassdoor_path', 'bls_path']
         for path_attr in paths_to_check:
             path_value = getattr(self, path_attr)
             if path_value and not os.path.exists(path_value):
                 errors.append(f"{path_attr} does not exist: {path_value}")
-        
+
         os.makedirs(self.output_dir, exist_ok=True)
-        
+
         if errors:
             raise ValueError(f"Configuration errors: {'; '.join(errors)}")
