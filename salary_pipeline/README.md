@@ -5,6 +5,7 @@ Production-ready pipeline for processing salary data with statistical outlier de
 ## Prerequisites
 
 Ensure `salary.py` is available at `/content/drive/MyDrive/salary.py` with the `normalize_salary` function.
+Ensure the correct path for the job sources parquet files.
 
 ## Quick Start
 
@@ -28,9 +29,9 @@ python /content/salary_pipeline/main.py --validate-only
 ├── main.py                   # Pipeline entry point
 ├── config.py                 # Configuration management
 ├── config.yaml              # Environment settings
-├── data_processor.py         # Data loading and preprocessing (ENHANCED)
+├── data_processor.py         # Data loading and preprocessing 
 ├── outlier_detector.py       # Statistical outlier detection
-├── statistics_generator.py   # Analytics and clean dataset generation (STREAMLINED)
+├── statistics_generator.py   # Analytics and clean dataset generation 
 ├── utils.py                 # Logging and memory management
 └── README.md                # Documentation
 ```
