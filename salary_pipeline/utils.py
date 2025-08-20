@@ -1,3 +1,4 @@
+
 import logging
 import sys
 import gc
@@ -5,8 +6,6 @@ import time
 import psutil
 
 class Logger:
-    """Simple logger for production use"""
-
     def __init__(self, name: str = "salary_pipeline"):
         self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.INFO)
@@ -28,9 +27,10 @@ class Logger:
     def warning(self, message: str):
         self.logger.warning(message)
 
-class SmartMemoryManager:
-    """Memory management utilities"""
+    def debug(self, message: str):
+        self.logger.debug(message)
 
+class SmartMemoryManager:
     def __init__(self):
         self.memory_info = psutil.virtual_memory()
         self.total_memory_gb = self.memory_info.total / (1024**3)

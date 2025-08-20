@@ -1,3 +1,4 @@
+
 development:
   # Data paths
   indeed_path: "/content/drive/MyDrive/Colab Notebooks/parquet_exports/indeed_us"
@@ -6,6 +7,14 @@ development:
   glassdoor_path: "/content/drive/MyDrive/glassdoor_soc_code_mapping.csv"
   bls_path: "/content/drive/MyDrive/BLS_all_data_M_2024.csv"
   output_dir: "/content/output"
+
+  # COLA Data paths
+  cola_data_paths:
+    county_economic: "/content/county_economic_stat.csv"
+    cities: "/content/uscities.csv"
+    zips: "/content/uszips.csv"
+    counties: "/content/uscounties.csv"
+    zip_database: "/content/zip_code_database.csv"
 
   # Date range
   start_date: "2025-06-01"
@@ -16,6 +25,45 @@ development:
   enable_simplyhired: true
   enable_linkedin: true
   enable_glassdoor: true
+
+  # Industry analysis
+  industry_analysis:
+    enabled: true
+    include_in_outlier_detection: false
+    min_coverage_rate: 0.30
+    include_in_statistics: true
+    standardize_names: true
+
+  # SOC-based detection
+  soc_detection:
+    enabled: true
+    min_samples: 15
+    iqr_scale: 3.0
+    sd_scale: 3.0
+
+  # Geographic context with COLA enabled
+  geographic_context:
+    enabled: true
+    use_dynamic_cola: true
+    use_simple_state_tiers: false
+    cola_cache_enabled: true
+
+  # COLA calculation settings
+  cola_settings:
+    salary_weight: 0.7
+    gdp_weight: 0.3
+    min_records_for_custom: 10
+    default_multiplier: 1.0
+    enable_zip_lookup: true
+    enable_city_lookup: true
+    cache_lookups: true
+
+  # Core outlier detection
+  outlier_detection:
+    min_group_size: 5
+    enable_industry_grouping: false
+    enable_soc_grouping: true
+    fallback_without_industry: true
 
   # Processing parameters
   salary_min: 15000.0
