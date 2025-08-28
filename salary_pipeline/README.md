@@ -11,7 +11,7 @@ This pipeline provides automated processing of multi-source salary data with sop
 ```
 salary_pipeline/
 ├── main.py                    # Pipeline orchestration and workflow management
-├── config.py                  # Configuration classes and data validation schemas  
+├── config.py                  # Configuration classes and data validation schemas
 ├── config.yaml               # Environment configuration and processing parameters
 ├── data_processor.py          # ETL operations and data quality validation
 ├── outlier_detector.py        # Statistical analysis and BLS validation engine
@@ -23,27 +23,138 @@ salary_pipeline/
 
 ## Data Requirements & Dependencies
 
-### Input Data Sources
+### Primary Salary Data Sources (Parquet Format)
 
-#### Primary Salary Data
-- **Job Sites Dataset**: Required fields include `salary`, `title`, `company`, `city`, `state`, `seniority`
-- **Glassdoor Dataset**: Required fields include `total_pay`, `job_title`, `company`, `location`, `years_of_exp`
+The pipeline expects parquet files organized in date-named directories under `/content/drive/MyDrive/SalaryDataFiles/parquet_exports/`:
 
-#### Reference Data Files
-- `county_economic_stat.csv` - County-level economic indicators
-- `state_industry_income.csv` - State-level industry income benchmarks
-- `zip_code_database.csv` - Geographic reference and demographic data
-- `uscities.csv` / `uscounties.csv` / 'uszips.csv' - Comprehensive US geographic taxonomy
-- `SAEMP27N_ALL_AREAS_1998_2021.csv` - BLS employment statistics by area
-- `SAINC7N_ALL_AREAS_1998_2022.csv` - BLS income statistics by area
+#### Job Board Sources
+- **indeed_us** / **indeed_ca** - Indeed job postings
+- **linkedin_us** / **linkedin_ca** - LinkedIn job postings
+- **simplyhired_us** - SimplyHired job postings
+- **jora_us** / **jora_ca** - Jora job postings
 
-#### Custom Modules
-- `salary.py` - Proprietary salary parsing and normalization module
+#### ATS/Company Sources
+- **jobvite** - Jobvite ATS data
+- **icims** - iCIMS ATS data
+- **greenhouse** - Greenhouse ATS data
+- **gem** - Gem recruiting data
+- **dayforce** - Dayforce/Ceridian data
+- **avature** - Avature ATS data
+- **ultipro** - UltiPro/UKG data
+- **smartrecruiter** - SmartRecruiters data
+- **lever** - Lever recruiting data
+- **myworkdayjobs** - Workday jobs data
+- **applytojob** - ApplyToJob platform data
+- **adpworkforce** - ADP Workforce data
+- **pjf_us** - PJF (Public Job Feed) data
 
-### Data Quality Thresholds
-- **Minimum Record Count**: 500 records per input file
-- **Field Coverage Requirements**: 30% non-null values for critical fields
-- **Statistical Significance**: Minimum sample sizes enforced for reliability metrics
+**Minimum Required Fields in Job Board Data:**
+- **Salary field** (any one of): `parsed_annual_salary_avg`, `salary_annual`, or `salary`
+- **Job title field**: `nlp_norm_title`
+
+**Optional Fields** (enhance analysis when available):
+- `company_name` - Company name
+- `final_city` or `city` - Job location city
+- `final_state` or `state` - Job location state
+- `nlp_seniority`, `seniority_level`, or `seniority` - Seniority classification
+- `nlp_soc_code` - Standard Occupational Classification code
+- `industry` - Industry classification
+- `db_insert_timestamp` - Data timestamp
+
+### Glassdoor Data (CSV Format)
+
+- **File Path**: `/content/drive/MyDrive/SalaryDataFiles/glassdoor_soc_code_mapping.csv`
+- **Minimum Required Fields**:
+  - `total_pay` - Total compensation amount
+  - `normalizedTitle` - Standardized job title
+
+**Optional Glassdoor Fields**:
+- `company_name` - Company name
+- `location` - Job location (city, state format)
+- `years_of_exp` - Years of experience (e.g., "1-3 years")
+- `industry` - Industry classification
+- `mapped_soc_code` - SOC code mapping
+- `submitted_date` - Submission timestamp
+
+### Required Reference Files
+
+#### BLS Data (Required for Statistical Validation)
+- **File Path**: `/content/drive/MyDrive/SalaryDataFiles/BLS_all_data_M_2024.csv`
+- **Purpose**: Government salary benchmark validation
+- **Required Columns**:
+  - SOC/occupation code column (column name contains "OCC_CODE")
+  - 10th percentile salary column (column name contains "PCT10" or "P10" and "A_")
+  - 90th percentile salary column (column name contains "PCT90" or "P90" and "A_")
+
+#### Cost-of-Living (COLA) Files (Required for Geographic Analysis)
+- **`/content/drive/MyDrive/SalaryDataFiles/county_economic_stat.csv`** - County economic indicators
+  - Required columns: `GeoFIPS`, `avg_salary`, `gdp_per_capita`
+- **`/content/drive/MyDrive/SalaryDataFiles/uscities.csv`** - US cities reference
+  - Required columns: `city`, `state_id`, `county_fips`
+
+#### COLA Enhancement Files
+- **`/content/drive/MyDrive/SalaryDataFiles/uszips.csv`** - US zip codes (enables zip-based COLA lookup)
+  - Required columns: `zip`, `county_fips`
+- **`/content/drive/MyDrive/SalaryDataFiles/uscounties.csv`** - US counties reference
+- **`/content/drive/MyDrive/SalaryDataFiles/zip_code_database.csv`** - Additional zip code data
+
+### Additional Reference Files
+- **`SAEMP27N_ALL_AREAS_1998_2021.csv`** - BLS employment statistics by area
+- **`SAINC7N_ALL_AREAS_1998_2022.csv`** - BLS income statistics by area
+- **`state_industry_income.csv`** - State-level industry income benchmarks
+
+### Custom Module Dependency
+
+- **`salary.py`** - Must be accessible at `/content/drive/MyDrive/SalaryDataFiles/salary.py`
+  - Required function: `normalize_salary(salary_text)`
+  - Returns: `(min_salary, max_salary, avg_salary)` tuple
+
+### Centralized File Location
+
+All required data files are now centrally located in:
+**`/content/drive/MyDrive/SalaryDataFiles/`**
+
+This includes:
+- Parquet export directories (`parquet_exports/`)
+- Glassdoor data (`glassdoor_soc_code_mapping.csv`)
+- BLS benchmark data (`BLS_all_data_M_2024.csv`)
+- COLA reference files (`county_economic_stat.csv`, `uscities.csv`, etc.)
+- Custom salary parsing module (`salary.py`)
+- All other supporting CSV files
+
+Ensure your `config.yaml` paths point to this central location as shown in the configuration examples.
+
+### File Organization Structure
+
+```
+/content/drive/MyDrive/SalaryDataFiles/
+├── parquet_exports/
+│   ├── indeed_us/
+│   │   ├── 2025-06-01.parquet
+│   │   ├── 2025-06-02.parquet
+│   │   └── ...
+│   ├── simplyhired_us/
+│   └── [other sources]/
+├── glassdoor_soc_code_mapping.csv
+├── BLS_all_data_M_2024.csv
+├── salary.py
+├── county_economic_stat.csv
+├── uscities.csv
+├── uszips.csv (optional)
+├── uscounties.csv (optional)
+├── zip_code_database.csv (optional)
+├── SAEMP27N_ALL_AREAS_1998_2021.csv
+├── SAINC7N_ALL_AREAS_1998_2022.csv
+└── state_industry_income.csv
+```
+
+### Data Quality Requirements
+
+- **Minimum Records**: 500 records per input file
+- **Salary Coverage**: ≥30% non-null salary values
+- **Title Coverage**: ≥50% non-null job titles
+- **Date Range**: Files must be named `YYYY-MM-DD.parquet` within configured date range
+- **File Validation**: Files undergo automated quality checks before processing
 
 ## Component Architecture
 
@@ -116,23 +227,127 @@ Comprehensive salary statistics including:
 - **COLA Analysis**: cola_multiplier_avg, cola_tier_primary
 
 ## Usage
+### One-time setup
+1. Open the shared folder link : https://drive.google.com/drive/folders/1Hx26iPQNjLo3cEDNxq5P4HQmKBXAPwJH?usp=sharing
+2. Click Add shortcut to Drive.
+3. Choose My Drive (root) and do not rename the shortcut — keep it exactly SalaryDataFiles.
+4. To verify if the folder is added to your drive, run the below snippet -
 
-### Prerequisites
-1. Update `config.yaml` with your file paths and settings
-2. Ensure all required data files are available (see Data Requirements section)
-3. Verify `salary.py` module is accessible
-4. Reference Data files can be found at https://drive.google.com/drive/u/0/folders/1Hx26iPQNjLo3cEDNxq5P4HQmKBXAPwJH
-5. Create directory structure:
+```python
+from google.colab import drive
+drive.mount('/content/drive', force_remount=True)
 
-    ```bash
-    import os
-    pipeline_dir = "/content/salary_pipeline"  
-    os.makedirs(pipeline_dir, exist_ok=True)
-    ```
+import os
+DATA_DIR = "/content/drive/MyDrive/SalaryDataFiles"
+assert os.path.isdir(DATA_DIR), (
+    "Could not find 'SalaryDataFiles'. Make sure you added a shortcut to *My Drive* root "
+    "with the exact name 'SalaryDataFiles'."
+)
+print("Data directory:", DATA_DIR)
+```
+5. Common pitfall: If the assert fails, the shortcut was renamed (e.g., SalaryDataFiles (1)) or placed inside another folder. Move it to My Drive root and keep the exact name SalaryDataFiles.
 
-### Run the Pipeline
-```bash
-python salary_pipeline/main.py
+## Installation and Setup
+### To run this pipeline in Google Colab, follow these steps:
+
+1. **Open** [Google Colab](https://colab.research.google.com/)
+2. **Create** a new notebook
+3. **Run** these commands in order:
+
+```python
+# Clone the repository
+!git clone https://github.com/SimiShrivastava1/salary-data-pipeline.git
+
+# Navigate to the project directory
+%cd salary-data-pipeline
+
+# Switch to the feature branch
+!git checkout feature/salary-pipeline
+
+# Install required packages
+!pip install pandas==2.2.2 numpy==1.26.4 duckdb==1.0.0 pyarrow fastparquet PyYAML
+
+# Run the pipeline
+!python /content/salary_pipeline/main.py
 ```
 
-The pipeline will process all data and generate the output files in the specified output directory.
+**Ensure all '.py' files are in the correct directory**
+
+**Verify `config.yaml` is properly configured with your file paths**
+
+**Create Pipeline Directory Structure**
+   ```python
+   import os
+   pipeline_dir = "/content/salary_pipeline"
+   os.makedirs(pipeline_dir, exist_ok=True)
+   ```
+
+### Configuration
+
+1. **Update Configuration File (`config.yaml`)**
+   - Set date range: `start_date` and `end_date`
+   - Configure output directory: `output_dir`
+   - Verify file paths for all data sources match your file organization
+   - Enable/disable data sources as needed using the `enabled: true/false` flags
+
+2. **Data Source Configuration**
+   ```yaml
+   data_sources:
+     - name: "indeed_us"
+       path: "/content/drive/MyDrive/SalaryDataFiles/parquet_exports/indeed_us"
+       enabled: true
+       type: "job_board"
+   ```
+
+3. **COLA Settings Configuration**
+   ```yaml
+   cola_settings:
+     salary_weight: 0.7    # Weight for salary-based COLA calculations
+     gdp_weight: 0.3       # Weight for GDP-based COLA calculations
+     enable_zip_lookup: true
+     enable_city_lookup: true
+   ```
+
+### Data Preparation
+
+1. **Organize Salary Data**
+   - Place parquet files in dated subdirectories under each source folder
+   - File naming convention: `YYYY-MM-DD.parquet`
+   - Ensure minimum required fields (salary + job title) are present
+
+2. **Verify Reference Files**
+   - Confirm all required CSV files are in the correct locations
+   - Check that BLS data contains the required salary percentile columns
+   - Validate COLA files have necessary geographic mapping columns
+
+3. **Test Data Quality**
+   - Each parquet file should have ≥500 records
+   - Salary fields should have ≥30% coverage
+   - Job title fields should have ≥50% coverage
+
+### Performance Optimization
+
+1. **Memory Management**
+   - Pipeline automatically manages memory usage with chunked processing
+   - Configurable batch sizes in `config.yaml`
+   - Automatic garbage collection between processing stages
+
+2. **Processing Optimization**
+   - Enable only required data sources to reduce processing time
+   - Adjust date ranges to focus on specific time periods
+   - Configure outlier detection parameters based on data quality needs
+
+### Troubleshooting
+
+**Common Issues:**
+- **"No files in date range"**: Check parquet file naming and date range configuration
+- **"No salary data"**: Verify salary field names match expected columns
+- **"File loading error"**: Check file permissions and corruption
+- **"BLS validation failed"**: Confirm BLS file path and column structure
+
+**Log Analysis:**
+- LOADED messages indicate successful data source processing
+- SKIPPED messages show why sources were excluded
+- Processing statistics help identify data quality issues
+- Final record counts validate pipeline success
+

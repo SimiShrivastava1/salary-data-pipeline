@@ -1,131 +1,158 @@
 
+# Outlier detection (robust z-score + per-SOC IQR) and BLS validation in batches.
+
 import os
 import pandas as pd
 import numpy as np
 from typing import List, Tuple, Dict
-from utils import Logger
+
+from utils import Logger, extract_soc_norm
 from config import PipelineConfig
-from data_processor import calculate_percentile_weights, apply_source_weights  
+
+def _robust_log_zscores(s: pd.Series) -> pd.Series:
+    """
+    Compute robust z-scores in log space (good for heavy-tailed salaries).
+    Falls back to mean/std if MAD is zero.
+    """
+    s = pd.to_numeric(s, errors='coerce').where(lambda x: x > 0)
+    logs = np.log(s)
+    med = np.nanmedian(logs)
+    mad = np.nanmedian(np.abs(logs - med))
+    if not np.isfinite(mad) or mad == 0:
+        mu = np.nanmean(logs)
+        sd = np.nanstd(logs)
+        if not np.isfinite(sd) or sd == 0:
+            return pd.Series(np.zeros(len(s)), index=s.index)
+        return (logs - mu) / sd
+    return 0.6745 * (logs - med) / mad
+
+def _pick_soc_column(df: pd.DataFrame) -> str:
+    """Pick the best available SOC column from the dataframe."""
+    for c in ['soc_code', 'nlp_soc_code', 'mapped_soc_code', 'occupation_code', 'soc_clean']:
+        if c in df.columns:
+            return c
+    return None
+
+def _salary_for_validation(df: pd.DataFrame) -> pd.Series:
+    """Prefer national-equivalent salary if present; otherwise raw annual."""
+    if 'salary_national_equivalent' in df.columns and df['salary_national_equivalent'].notna().any():
+        return pd.to_numeric(df['salary_national_equivalent'], errors='coerce')
+    return pd.to_numeric(df['salary_annual'], errors='coerce')
 
 class MinimalOutlierDetector:
     def __init__(self, config: PipelineConfig, logger: Logger):
+        """Configure z-score and SOC thresholds and hold a logger for progress/errors."""
         self.config = config
         self.logger = logger
         self.soc_min_samples = config.soc_min_samples
         self.soc_iqr_scale = config.soc_iqr_scale
 
     def detect_zscore_outliers(self, df: pd.DataFrame) -> List[int]:
+        """Global outliers in log-salary space using the configured z-score threshold."""
         z_threshold = self.config.zscore_threshold
-
         try:
-            log_salaries = np.log(df['salary_annual'])
-            mean_log, std_log = log_salaries.mean(), log_salaries.std()
-            z_scores = (log_salaries - mean_log).abs() / std_log
-
-            outlier_mask = z_scores > z_threshold
-            outlier_indices = df.index[outlier_mask].tolist()
-
-            return outlier_indices
-
+            z = _robust_log_zscores(df['salary_annual'])
+            mask = z.abs() > z_threshold
+            return df.index[mask.fillna(False)].tolist()
         except Exception as e:
             self.logger.error(f"Z-score detection failed: {e}")
             return []
 
     def detect_soc_based_outliers(self, df: pd.DataFrame) -> List[int]:
-        if 'soc_code' not in df.columns:
+        """Within-SOC outliers via IQR; only runs for SOC groups with enough samples."""
+        soc_col = _pick_soc_column(df)
+        if not soc_col:
             return []
 
+        tmp = df[[soc_col, 'salary_annual']].copy()
+        tmp['soc_norm'] = extract_soc_norm(tmp[soc_col])
+        tmp['salary_annual'] = pd.to_numeric(tmp['salary_annual'], errors='coerce')
+
         soc_outliers = []
-        groups_processed = 0
-        total_groups = 0
-
         try:
-            for soc_code, group in df.groupby('soc_code'):
-                total_groups += 1
-
-                if pd.isna(soc_code) or len(group) < self.soc_min_samples:
+            for soc, group in tmp.groupby('soc_norm', dropna=True):
+                if pd.isna(soc) or len(group) < self.soc_min_samples:
                     continue
-
-                groups_processed += 1
-                salaries = group['salary_annual']
-
-                Q1 = salaries.quantile(0.25)
-                Q3 = salaries.quantile(0.75)
+                s = group['salary_annual'].dropna()
+                if len(s) < self.soc_min_samples:
+                    continue
+                Q1, Q3 = s.quantile(0.25), s.quantile(0.75)
                 IQR = Q3 - Q1
-
-                if IQR == 0:
+                if not np.isfinite(IQR) or IQR == 0:
                     continue
-
-                lower_bound = Q1 - self.soc_iqr_scale * IQR
-                upper_bound = Q3 + self.soc_iqr_scale * IQR
-
-                outlier_mask = (salaries < lower_bound) | (salaries > upper_bound)
-                group_outliers = group[outlier_mask].index.tolist()
-                soc_outliers.extend(group_outliers)
-
+                lb = Q1 - self.soc_iqr_scale * IQR
+                ub = Q3 + self.soc_iqr_scale * IQR
+                mask = (group['salary_annual'] < lb) | (group['salary_annual'] > ub)
+                if mask.any():
+                    soc_outliers.extend(group.index[mask].tolist())
             return soc_outliers
-
         except Exception as e:
             self.logger.error(f"SOC-based detection failed: {e}")
             return []
 
     def detect_all_outliers(self, df: pd.DataFrame) -> Tuple[List[int], Dict]:
+        """Run z-score + SOC detectors, de-duplicate indices, and return both the list and simple method stats."""
         all_outliers = set()
-        detection_results = {}
-
-        zscore_outliers = self.detect_zscore_outliers(df)
-        all_outliers.update(zscore_outliers)
-        detection_results['zscore'] = len(zscore_outliers)
+        results = {}
 
         soc_outliers = self.detect_soc_based_outliers(df)
         all_outliers.update(soc_outliers)
-        detection_results['soc_based'] = len(soc_outliers)
+        results['soc_based'] = len(soc_outliers)
 
-        final_outliers = sorted(all_outliers)
-        outlier_rate = len(final_outliers) / len(df) * 100
+        z_outliers = self.detect_zscore_outliers(df)
+        all_outliers.update(z_outliers)
+        results['zscore_robust'] = len(z_outliers)
 
-        zscore_set = set(zscore_outliers)
-        soc_set = set(soc_outliers)
-        overlap = len(zscore_set.intersection(soc_set))
-        zscore_only = len(zscore_set - soc_set)
-        soc_only = len(soc_set - zscore_set)
+        final = sorted(all_outliers)
+        rate = len(final) / max(len(df), 1) * 100
 
-        detection_results.update({
-            'total_unique_outliers': len(final_outliers),
-            'outlier_rate': outlier_rate,
-            'methods_used': ['zscore', 'soc_based'],
+        zs, ss = set(z_outliers), set(soc_outliers)
+        results.update({
+            'total_unique_outliers': len(final),
+            'outlier_rate': rate,
+            'methods_used': ['soc_iqr', 'zscore_robust_log'],
             'overlap_analysis': {
-                'zscore_only': zscore_only,
-                'soc_only': soc_only,
-                'both_methods': overlap
+                'zscore_only': len(zs - ss),
+                'soc_only': len(ss - zs),
+                'both_methods': len(zs & ss),
             }
         })
-
-        return final_outliers, detection_results
+        return final, results
 
     def bls_validate(self, df: pd.DataFrame, outlier_indices: List[int]) -> Dict:
+        """Batch-validate outliers against BLS P10/P90 annual earnings. Processes all outliers in memory-safe chunks; returns category counts and validation rate."""
         bls_path = self.config.bls_path
+        BATCH = getattr(self.config, "bls_batch_size", 20000)
 
         try:
             if not os.path.exists(bls_path):
                 return {'error': 'BLS file not found'}
 
             original_count = len(outlier_indices)
-            if len(outlier_indices) > 50000:
-                import random
-                sampled_indices = random.sample(outlier_indices, 50000)
-                outlier_indices = sampled_indices
+            if original_count == 0:
+                return {
+                    'categories': {'below_p10': 0, 'above_p90': 0, 'within_range': 0, 'no_bls_match': 0},
+                    'validation_rate': 0.0, 'legitimate_outliers': 0,
+                    'total_processed': 0, 'original_outlier_count': 0,
+                    'sampled': False, 'bls_matches': 0, 'batch_size': BATCH
+                }
 
-            bls = pd.read_csv(bls_path, dtype=str, low_memory=False)
+            # Ensure unique indices
+            if len(outlier_indices) != len(set(outlier_indices)):
+                outlier_indices = list(dict.fromkeys(outlier_indices))
 
+            # Load BLS
+            bls = pd.read_csv(bls_path, dtype=str, low_memory=True)
+
+            # Find columns dynamically
             code_col = p10_col = p90_col = None
             for col in bls.columns:
-                col_upper = col.upper()
-                if 'OCC_CODE' in col_upper and not code_col:
+                cu = col.upper()
+                if 'OCC_CODE' in cu and code_col is None:
                     code_col = col
-                elif ('PCT10' in col_upper or 'P10' in col_upper) and 'A_' in col_upper:
+                elif ('PCT10' in cu or 'P10' in cu) and 'A_' in cu:
                     p10_col = col
-                elif ('PCT90' in col_upper or 'P90' in col_upper) and 'A_' in col_upper:
+                elif ('PCT90' in cu or 'P90' in cu) and 'A_' in cu:
                     p90_col = col
 
             if not all([code_col, p10_col, p90_col]):
@@ -134,80 +161,89 @@ class MinimalOutlierDetector:
                     'found_columns': {'code_col': code_col, 'p10_col': p10_col, 'p90_col': p90_col}
                 }
 
+            # Normalize SOC and clean salaries
             bls['soc_code_clean'] = bls[code_col].astype(str).str.extract(r'(\d{2}-?\d{4})')[0]
+            bls['soc_code_norm']  = bls['soc_code_clean'].str.replace('-', '', regex=False)
 
-            def clean_salary(salary_str):
-                if pd.isna(salary_str):
+            def _clean_currency(s):
+                if s is None or pd.isna(s):
                     return None
-                cleaned = str(salary_str).replace(',', '').replace('$', '').replace(' ', '')
-                cleaned = ''.join(c for c in cleaned if c.isdigit() or c == '.')
+                cleaned = str(s).replace(',', '').replace('$', '').replace(' ', '')
+                cleaned = ''.join(c for c in cleaned if (c.isdigit() or c == '.'))
                 try:
                     return float(cleaned) if cleaned else None
-                except:
+                except Exception:
                     return None
 
-            bls['bls_p10'] = bls[p10_col].apply(clean_salary)
-            bls['bls_p90'] = bls[p90_col].apply(clean_salary)
+            bls['bls_p10'] = bls[p10_col].apply(_clean_currency)
+            bls['bls_p90'] = bls[p90_col].apply(_clean_currency)
 
-            valid_bls = bls.dropna(subset=['soc_code_clean', 'bls_p10', 'bls_p90'])
-            lookup_dict = {}
-            for _, row in valid_bls.iterrows():
-                soc_code = row['soc_code_clean']
-                if soc_code and not pd.isna(soc_code):
-                    lookup_dict[soc_code] = {
-                        'p10': row['bls_p10'],
-                        'p90': row['bls_p90']
-                    }
+            valid = bls.dropna(subset=['soc_code_norm', 'bls_p10', 'bls_p90'])
+            if valid.empty:
+                return {'validation_skipped': True, 'reason': 'No usable rows in BLS file after cleaning'}
 
-            soc_col = None
-            for col in ['soc_code', 'soc_clean', 'SOC_CODE', 'occupation_code']:
-                if col in df.columns:
-                    soc_col = col
-                    break
+            agg = (valid.groupby('soc_code_norm', as_index=False).agg(bls_p10=('bls_p10', 'median'), bls_p90=('bls_p90', 'median')))
 
+            p10_map = pd.Series(agg['bls_p10'].values, index=agg['soc_code_norm'].values)
+            p90_map = pd.Series(agg['bls_p90'].values, index=agg['soc_code_norm'].values)
+
+            soc_col = _pick_soc_column(df)
             if not soc_col:
                 return {'validation_skipped': True, 'reason': 'No SOC codes available'}
 
-            outlier_df = df.loc[outlier_indices].copy()
-            outlier_df['soc_clean'] = outlier_df[soc_col].astype(str).str.extract(r'(\d{2}-?\d{4})')[0]
+            salary_series = _salary_for_validation(df)
 
-            categories = {'below_p10': 0, 'above_p90': 0, 'within_range': 0, 'no_bls_match': 0}
+            cats_total = {'below_p10': 0, 'above_p90': 0, 'within_range': 0, 'no_bls_match': 0}
+            matched_total = 0
+            processed_total = 0
 
-            for idx, row in outlier_df.iterrows():
-                try:
-                    soc_code = row['soc_clean']
-                    salary = row['salary_annual']
+            for start in range(0, original_count, BATCH):
+                batch_idx = outlier_indices[start:start + BATCH]
 
-                    if pd.isna(soc_code) or soc_code not in lookup_dict:
-                        categories['no_bls_match'] += 1
-                        continue
+                batch_soc = df.loc[batch_idx, soc_col].copy()
+                batch_soc_norm = extract_soc_norm(batch_soc)
 
-                    p10 = lookup_dict[soc_code]['p10']
-                    p90 = lookup_dict[soc_code]['p90']
+                batch_p10 = batch_soc_norm.map(p10_map)
+                batch_p90 = batch_soc_norm.map(p90_map)
+                batch_sal = salary_series.loc[batch_idx]
 
-                    if salary < p10:
-                        categories['below_p10'] += 1
-                    elif salary > p90:
-                        categories['above_p90'] += 1
-                    else:
-                        categories['within_range'] += 1
+                match_mask = batch_p10.notna() & batch_p90.notna() & batch_sal.notna()
+                matched = int(match_mask.sum())
 
-                except Exception:
-                    categories['no_bls_match'] += 1
+                below_mask = match_mask & (batch_sal < batch_p10)
+                above_mask = match_mask & (batch_sal > batch_p90)
+                within_mask = match_mask & ~(below_mask | above_mask)
 
-            total_validated = sum(categories.values())
-            legitimate_outliers = categories['below_p10'] + categories['above_p90']
-            validation_rate = (legitimate_outliers / total_validated * 100) if total_validated > 0 else 0
+                cats_total['below_p10']    += int(below_mask.sum())
+                cats_total['above_p90']    += int(above_mask.sum())
+                cats_total['within_range'] += int(within_mask.sum())
+                cats_total['no_bls_match'] += int(len(batch_idx) - matched)
+
+                matched_total   += matched
+                processed_total += int(len(batch_idx))
+
+            legitimate_outliers = cats_total['below_p10'] + cats_total['above_p90']
+            validation_rate = (legitimate_outliers / matched_total * 100.0) if matched_total > 0 else 0.0
+
+            self.logger.info(
+                f"BLS match stats — matched: {matched_total:,} / {processed_total:,}; "
+                f"below_p10: {cats_total['below_p10']}, above_p90: {cats_total['above_p90']}, "
+                f"within: {cats_total['within_range']}, no_match: {cats_total['no_bls_match']}"
+            )
 
             return {
-                'categories': categories,
+                'categories': cats_total,
                 'validation_rate': validation_rate,
                 'legitimate_outliers': legitimate_outliers,
-                'total_processed': len(outlier_indices),
+                'total_processed': processed_total,
                 'original_outlier_count': original_count,
-                'sampled': len(outlier_indices) < original_count
+                'sampled': False,
+                'bls_matches': matched_total,
+                'used_salary': 'salary_national_equivalent' if 'salary_national_equivalent' in df.columns else 'salary_annual',
+                'batch_size': BATCH
             }
 
         except Exception as e:
             self.logger.error(f"BLS validation failed: {e}")
             return {'error': str(e)}
+

@@ -32,10 +32,7 @@ class COLAProcessor:
             salary_weight = self.config.cola_settings['salary_weight']
             gdp_weight = self.config.cola_settings['gdp_weight']
 
-            county_econ['cola_multiplier'] = (
-                county_econ['salary_multiplier'] * salary_weight +
-                county_econ['gdp_multiplier'] * gdp_weight
-            )
+            county_econ['cola_multiplier'] = (county_econ['salary_multiplier'] * salary_weight + county_econ['gdp_multiplier'] * gdp_weight)
 
             cities = self._load_geographic_file('cities')
             zips = self._load_geographic_file('zips') if self.config.cola_settings['enable_zip_lookup'] else None
@@ -68,13 +65,7 @@ class COLAProcessor:
     def _build_county_lookup(self, county_econ: pd.DataFrame) -> None:
         for _, row in county_econ.iterrows():
             fips = int(row['GeoFIPS'])
-            self.cola_lookup[f"county_{fips}"] = {
-                'multiplier': row['cola_multiplier'],
-                'tier': self._get_cola_tier(row['cola_multiplier']),
-                'avg_salary': row['avg_salary'],
-                'gdp_per_capita': row['gdp_per_capita'],
-                'lookup_type': 'county'
-            }
+            self.cola_lookup[f"county_{fips}"] = {'multiplier': row['cola_multiplier'], 'tier': self._get_cola_tier(row['cola_multiplier']), 'avg_salary': row['avg_salary'], 'gdp_per_capita': row['gdp_per_capita'], 'lookup_type': 'county'}
 
     def _build_city_lookup(self, cities: pd.DataFrame, county_econ: pd.DataFrame) -> None:
         county_fips_set = set(int(fips) for fips in county_econ['GeoFIPS'])
@@ -100,6 +91,7 @@ class COLAProcessor:
                 continue
 
     def _build_zip_lookup(self, zips: pd.DataFrame, county_econ: pd.DataFrame) -> None:
+        """Prepare ZIP → COLA tier/multiplier lookup from reference files."""
         county_fips_set = set(int(fips) for fips in county_econ['GeoFIPS'])
         zip_count = 0
 
@@ -125,12 +117,7 @@ class COLAProcessor:
             'counties_with_data': len(county_econ),
             'cities_mapped': len([k for k in self.cola_lookup.keys() if not k.startswith(('county_', 'zip_', 'state_'))]),
             'zips_mapped': len([k for k in self.cola_lookup.keys() if k.startswith('zip_')]),
-            'multiplier_range': {
-                'min': float(county_econ['cola_multiplier'].min()),
-                'max': float(county_econ['cola_multiplier'].max()),
-                'mean': float(county_econ['cola_multiplier'].mean()),
-                'std': float(county_econ['cola_multiplier'].std())
-            }
+            'multiplier_range': {'min': float(county_econ['cola_multiplier'].min()), 'max': float(county_econ['cola_multiplier'].max()), 'mean': float(county_econ['cola_multiplier'].mean()), 'std': float(county_econ['cola_multiplier'].std())}
         }
 
     def _get_cola_tier(self, multiplier: float) -> str:
@@ -144,14 +131,9 @@ class COLAProcessor:
     def _build_fallback_system(self) -> None:
         self.logger.warning("COLA multiplier files not found or failed to load - switching to default multiplier system")
         self.cola_lookup = {}
-        
+
         # Set minimal coverage stats for fallback
-        self.coverage_stats = {
-            'counties_with_data': 0,
-            'cities_mapped': 0,
-            'zips_mapped': 0,
-            'multiplier_range': {'min': 1.0, 'max': 1.0, 'mean': 1.0, 'std': 0.0}
-        }
+        self.coverage_stats = {'counties_with_data': 0, 'cities_mapped': 0, 'zips_mapped': 0, 'multiplier_range': {'min': 1.0, 'max': 1.0, 'mean': 1.0, 'std': 0.0}}
 
     def get_cola_info(self, city: str, state: str, zip_code: str = None) -> Dict:
         cache_key = f"{city}|{state}|{zip_code}"
@@ -160,14 +142,7 @@ class COLAProcessor:
 
         # If no COLA data available, return default values
         if not self.cola_lookup:
-            result = {
-                'multiplier': 1.0,
-                'tier': 'National Average',
-                'avg_salary': 0,
-                'gdp_per_capita': 0,
-                'lookup_type': 'disabled',
-                'lookup_method': 'COLA Disabled'
-            }
+            result = {'multiplier': 1.0, 'tier': 'National Average', 'avg_salary': 0, 'gdp_per_capita': 0, 'lookup_type': 'disabled', 'lookup_method': 'COLA Disabled'}
             self.lookup_cache[cache_key] = result
             return result
 
@@ -180,12 +155,7 @@ class COLAProcessor:
                 return result
 
         if city and state and self.config.cola_settings['enable_city_lookup']:
-            city_variations = [
-                f"{city}, {state}",
-                f"{city.title()}, {state}",
-                f"{city.upper()}, {state}",
-                f"{city.lower()}, {state}"
-            ]
+            city_variations = [f"{city}, {state}", f"{city.title()}, {state}", f"{city.upper()}, {state}", f"{city.lower()}, {state}"]
 
             for city_key in city_variations:
                 if city_key in self.cola_lookup:
@@ -203,28 +173,18 @@ class COLAProcessor:
                 return result
 
         # Default fallback when COLA is enabled but no match found
-        result = {
-            'multiplier': self.config.cola_settings['default_multiplier'],
-            'tier': 'National Average',
-            'avg_salary': 0,
-            'gdp_per_capita': 0,
-            'lookup_type': 'default',
-            'lookup_method': 'Default'
-        }
+        result = { 'multiplier': self.config.cola_settings['default_multiplier'], 'tier': 'National Average', 'avg_salary': 0, 'gdp_per_capita': 0, 'lookup_type': 'default', 'lookup_method': 'Default'}
 
         self.lookup_cache[cache_key] = result
         return result
 
     def add_cola_to_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Attach COLA multiplier, tier, and national-equivalent salary using the internal lookup tables."""
         cola_results = []
         lookup_method_counts = {}
 
         for _, row in df.iterrows():
-            cola_info = self.get_cola_info(
-                row.get('city', 'Unknown'),
-                row.get('state', 'Unknown'),
-                row.get('zip_code')
-            )
+            cola_info = self.get_cola_info(row.get('city', 'Unknown'), row.get('state', 'Unknown'), row.get('zip_code'))
 
             method = cola_info['lookup_method']
             lookup_method_counts[method] = lookup_method_counts.get(method, 0) + 1

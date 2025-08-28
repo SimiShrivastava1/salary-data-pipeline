@@ -27,8 +27,8 @@ class EnhancedStatisticsGenerator:
             return "1.00"
         return f"{multiplier:.2f}"
 
-    def generate_clean_dataset_and_stats(self, df: pd.DataFrame, outlier_indices: List[int],
-                                        bls_results: Dict) -> Dict[str, Any]:
+    def generate_clean_dataset_and_stats(self, df: pd.DataFrame, outlier_indices: List[int], bls_results: Dict) -> Dict[str, Any]:
+        """Create the cleaned output dataset and optional grouped statistics, then write them to disk."""
         os.makedirs(self.config.output_dir, exist_ok=True)
 
         legitimate_outlier_indices = self._determine_outliers_to_remove(outlier_indices, bls_results)
@@ -60,6 +60,7 @@ class EnhancedStatisticsGenerator:
         }
 
     def _determine_outliers_to_remove(self, outlier_indices: List[int], bls_results: Dict) -> set:
+        """Use the provided detector to compute outlier indices and return a set for fast filtering."""
         if 'legitimate_outliers' in bls_results:
           legitimate_count = bls_results['legitimate_outliers']
           num_to_remove = min(legitimate_count, len(outlier_indices))
@@ -68,12 +69,10 @@ class EnhancedStatisticsGenerator:
           return set()
 
     def _generate_enhanced_statistics(self, clean_df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Generate statistics with smart Unknown seniority grouping and COLA weights
-        """
+        """Aggregate by title/location/industry/seniority and compute counts, means/medians, and simple CIs."""
         # Create smart sub-groups for Unknown seniority records
         enhanced_df = self._create_smart_unknown_groups(clean_df)
-        
+
         # Preserve original salaries before any processing
         enhanced_df = self._preserve_original_salaries(enhanced_df)
 
@@ -103,12 +102,12 @@ class EnhancedStatisticsGenerator:
                 continue
 
             groups_kept += 1
-            
+
             # Get both original and adjusted salaries
             original_salaries = group_data['salary_original']
-            adjusted_salaries = group_data['salary_annual']  
+            adjusted_salaries = group_data['salary_annual']
             cola_multipliers = group_data.get('cola_multiplier', pd.Series([1.0] * len(group_data)))
-            
+
             weights = group_data.get('final_weight', pd.Series([1] * len(group_data)))
 
             stats_dict = {}
@@ -122,7 +121,7 @@ class EnhancedStatisticsGenerator:
                 stats_dict['industry'] = 'Unknown'
 
             stats_dict['record_count'] = len(group_data)
-            
+
             # Calculate both original and adjusted salary statistics
             stats_dict['mean_salary_original'] = (original_salaries * weights).sum() / weights.sum()
             stats_dict['mean_salary_adjusted'] = (adjusted_salaries * weights).sum() / weights.sum()
@@ -130,7 +129,7 @@ class EnhancedStatisticsGenerator:
             stats_dict['median_salary_adjusted'] = adjusted_salaries.median()
             stats_dict['min_salary_original'] = original_salaries.min()
             stats_dict['max_salary_original'] = original_salaries.max()
-            
+
             # COLA-related statistics
             stats_dict['cola_multiplier_avg'] = cola_multipliers.mean()
 
@@ -177,7 +176,7 @@ class EnhancedStatisticsGenerator:
 
         required_columns = [
             'job_title_normalized', 'city', 'state', 'industry', 'seniority_level',
-            'record_count', 'mean_salary_original', 'mean_salary_adjusted', 
+            'record_count', 'mean_salary_original', 'mean_salary_adjusted',
             'median_salary_original', 'median_salary_adjusted',
             'min_salary_original', 'max_salary_original',
             'cola_multiplier_avg', 'cola_tier_primary',
@@ -208,7 +207,7 @@ class EnhancedStatisticsGenerator:
             else:
                 # Fallback: assume current salary_annual is the original
                 df['salary_original'] = df['salary_annual'].copy()
-        
+
         return df
 
     def _create_smart_unknown_groups(self, df):
@@ -242,12 +241,7 @@ class EnhancedStatisticsGenerator:
                 n_quartiles = min(4, unique_salaries)
 
                 if n_quartiles >= 2:
-                    title_group['salary_quartile'] = pd.qcut(
-                        title_group['salary_annual'],
-                        q=n_quartiles,
-                        labels=False,
-                        duplicates='drop'
-                    )
+                    title_group['salary_quartile'] = pd.qcut(title_group['salary_annual'], q=n_quartiles, labels=False, duplicates='drop')
 
                     # Create descriptive seniority labels
                     if n_quartiles == 4:
@@ -296,12 +290,8 @@ class EnhancedStatisticsGenerator:
         client_stats_df = stats_df.copy()
 
         # Format salary columns
-        salary_columns = [
-            'mean_salary_original', 'mean_salary_adjusted', 
-            'median_salary_original', 'median_salary_adjusted',
-            'min_salary_original', 'max_salary_original'
-        ]
-        
+        salary_columns = ['mean_salary_original', 'mean_salary_adjusted', 'median_salary_original', 'median_salary_adjusted', 'min_salary_original', 'max_salary_original']
+
         for col in salary_columns:
             if col in client_stats_df.columns:
                 client_stats_df[col] = client_stats_df[col].apply(self._format_salary)
@@ -337,7 +327,7 @@ class EnhancedStatisticsGenerator:
 
         client_columns = [
             'Job Title', 'City', 'State', 'Industry', 'Seniority Level', 'Record Count',
-            'Average Salary (Original)', 'Average Salary (COLA)', 
+            'Average Salary (Original)', 'Average Salary (COLA)',
             'Median Salary (Original)', 'Median Salary (COLA)',
             'Min Salary (Original)', 'Max Salary (Original)',
             'COLA Multiplier', 'COLA Tier', 'Salary Range (95% CI)',

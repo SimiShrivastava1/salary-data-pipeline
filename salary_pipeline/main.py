@@ -50,7 +50,7 @@ class EnhancedSalaryPipeline:
 
         try:
             df = self._load_and_process_data()
-            
+
             # CHECK: If no data loaded, raise error for retry
             if df is None or len(df) == 0:
                 raise FileLoadingError("Data loading failed - no files were loaded")
@@ -82,7 +82,7 @@ class EnhancedSalaryPipeline:
         except FileLoadingError:
             # Re-raise file loading errors for retry logic
             raise
-            
+
         except Exception as e:
             runtime = (datetime.now() - start_time).total_seconds() / 60
             self.logger.error(f"Pipeline failed after {runtime:.1f} minutes: {e}")
@@ -99,7 +99,7 @@ class EnhancedSalaryPipeline:
 
             try:
                 df = processor.load_all_data_sources()
-                
+
                 # CHECK: If processor returns None or empty data
                 if df is None or len(df) == 0:
                     raise FileLoadingError("No data loaded from file processor")
@@ -129,11 +129,11 @@ class EnhancedSalaryPipeline:
         return df
 
     def _log_outlier_results(self, outlier_results: Dict):
-        total_outliers = outlier_results.get('zscore', 0)
+        total_outliers = outlier_results.get('total_unique_outliers', 0)
         total_records = outlier_results.get('total_records', 1)
         outlier_percentage = (total_outliers / total_records * 100) if total_records > 0 else 0
 
-        self.logger.info(f"Z-score outliers detected: {total_outliers:,} ({outlier_percentage:.2f}%)")
+        self.logger.info(f"Outliers detected: {total_outliers:,} ({outlier_percentage:.2f}%)")
 
     def _log_bls_results(self, bls_results: Dict):
         if 'error' in bls_results:
@@ -156,43 +156,43 @@ def run_pipeline_once():
 
     pipeline = EnhancedSalaryPipeline(config)
     success = pipeline.run()
-    
+
     if not success:
         raise Exception("Pipeline execution returned False")
-    
+
     return success
 
 
 def main():
     """Main function with auto-retry logic"""
-    
+
     max_retries = 2
     retry_delay = 30
-    
+
     for attempt in range(max_retries):
         try:
             print(f"Pipeline attempt {attempt + 1}/{max_retries}")
-            
-            # Run your existing pipeline
+
+            # Run the pipeline
             success = run_pipeline_once()
-            
+
             if success:
                 print("Pipeline completed successfully")
                 break
-            
+
         except FileLoadingError as e:
             print(f"File loading failed: {e}")
-            
+
             if attempt < max_retries - 1:
                 print(f"Retrying in {retry_delay} seconds")
                 time.sleep(retry_delay)
             else:
                 print("Max retries reached. Pipeline failed permanently.")
                 sys.exit(1)
-                
+
         except Exception as e:
             print(f"Pipeline error: {e}")
-            
+
             if attempt < max_retries - 1:
                 print(f"Retrying in {retry_delay} seconds")
                 time.sleep(retry_delay)
