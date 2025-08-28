@@ -267,20 +267,20 @@ print("Data directory:", DATA_DIR)
 # Install required packages
 !pip install pandas==2.2.2 numpy==1.26.4 duckdb==1.0.0 pyarrow fastparquet PyYAML
 
+# Navigate to the salary directory
+%cd salary_pipeline
+
 # Run the pipeline
-!python /content/salary_pipeline/main.py
+!python main.py
+
+#Alternatively you can run it without changing the directory
+!python /content/salary-data-pipeline/salary_pipeline/main.py
 ```
 
 **Ensure all '.py' files are in the correct directory**
 
 **Verify `config.yaml` is properly configured with your file paths**
 
-**Create Pipeline Directory Structure**
-   ```python
-   import os
-   pipeline_dir = "/content/salary_pipeline"
-   os.makedirs(pipeline_dir, exist_ok=True)
-   ```
 
 ### Configuration
 

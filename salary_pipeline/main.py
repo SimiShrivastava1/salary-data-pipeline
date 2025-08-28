@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 from typing import Dict, List, Any
 
-sys.path.append('/content/salary_pipeline')
+sys.path.append('/content/salary-data-pipeline/salary_pipeline')
 sys.path.append('/content/drive/MyDrive')
 
 from config import PipelineConfig
@@ -151,7 +151,7 @@ class EnhancedSalaryPipeline:
 
 
 def run_pipeline_once():
-    config = PipelineConfig.from_yaml('/content/salary_pipeline/config.yaml', 'development')
+    config = PipelineConfig.from_yaml('/content/salary-data-pipeline/salary_pipeline/config.yaml', 'development')
     config.validate()
 
     pipeline = EnhancedSalaryPipeline(config)
