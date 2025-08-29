@@ -105,7 +105,7 @@ The pipeline expects parquet files organized in date-named directories under `/c
 
 ### Custom Module Dependency
 
-- **`salary.py`** - Must be accessible at `/content/drive/MyDrive/SalaryDataFiles/salary.py`
+- **`salary.py`** - Must be accessible at `salary_pipeline/salary.py`
   - Required function: `normalize_salary(salary_text)`
   - Returns: `(min_salary, max_salary, avg_salary)` tuple
 
@@ -212,6 +212,8 @@ The pipeline processes data through these components in sequence:
 4. **COLA Processor**: Adjusts salaries for geographic cost-of-living differences
 
 ## Output Files
+
+**Location**: Files are created in the directory specified by `output_dir` in the config (default: `/content/output`)
 
 ### 1. Clean Dataset (`clean_salary_dataset.parquet`)
 - All salary data with outliers removed and quality validation applied
@@ -350,4 +352,8 @@ print("Data directory:", DATA_DIR)
 - SKIPPED messages show why sources were excluded
 - Processing statistics help identify data quality issues
 - Final record counts validate pipeline success
+
+**Output Issues:**
+- **"No output folder created"**: Check file permissions and disk space. Pipeline creates folder automatically on successful completion.
+- **"No module named salary"**: Ensure you're using the latest version of the repository that includes `salary.py`
 
