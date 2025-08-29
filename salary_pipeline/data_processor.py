@@ -451,45 +451,78 @@ class EnhancedSmartFileProcessor:
         validate_data_coverage(df, title_col, schema.min_coverage.get('job_title', 0.5), source_name)
 
     def _load_source_data_with_validation(self, source_name: str, folder_path: str):
-        files = self.find_files_in_date_range(folder_path)
-        if not files:
-            raise DataValidationError(f"{source_name}: No files in date range")
+      files = self.find_files_in_date_range(folder_path)
+      if not files:
+          raise DataValidationError(f"{source_name}: No files in date range")
 
-        validated_files = []
+      validated_files = []
+      total_records = 0
+      total_valid_records = 0
+      total_salary_records = 0
+      total_valid_salary_records = 0
+      
+      # Track aggregated stats across all files for this source
+      for file_path in files:
+          try:
+              df = load_and_validate_file(file_path, source_name, self.conn)
+              
+              # Count records and salary coverage before validation
+              total_records += len(df)
+              if len(df) >= 500:  # Only count records from files with minimum size
+                  total_valid_records += len(df)
+                  
+                  # Check salary coverage
+                  source_type = 'glassdoor' if source_name == 'glassdoor' else 'job_board'
+                  salary_cols = COLUMN_MAPPINGS['salary_columns'][source_type]
+                  salary_col = get_best_column(df, salary_cols, source_name, required=False)
+                  if salary_col:
+                      salary_count = df[salary_col].notna().sum()
+                      total_salary_records += len(df)
+                      total_valid_salary_records += salary_count
+              
+              self._validate_file_quality(df, source_name)
+              validated_files.append(file_path)
+              
+          except (DataValidationError, FileProcessingError):
+              continue
 
-        # Validate each file
-        for file_path in files:
-            try:
-                df = load_and_validate_file(file_path, source_name, self.conn)
-                self._validate_file_quality(df, source_name)
-                validated_files.append(file_path)
-            except (DataValidationError, FileProcessingError):
-                continue
+      if not validated_files:
+          # Create concise summary of the main issues
+          issues = []
+          
+          if total_valid_records == 0:
+              issues.append(f"Too few records (all files < 500)")
+          
+          if total_salary_records > 0:
+              salary_coverage = (total_valid_salary_records / total_salary_records) * 100
+              if salary_coverage < 30:
+                  issues.append(f"Low salary coverage ({salary_coverage:.1f}%)")
+          else:
+              issues.append("No salary data found")
+              
+          raise DataValidationError(f"{source_name}: {'; '.join(issues)}")
 
-        if not validated_files:
-            raise DataValidationError(f"{source_name}: No valid files found")
+      # Process validated files (keeping your existing chunking logic)
+      chunk_size = self.memory_mgr.calculate_optimal_chunk_size(len(validated_files))
+      chunks = []
 
-        # Process validated files
-        chunk_size = self.memory_mgr.calculate_optimal_chunk_size(len(validated_files))
-        chunks = []
+      for i in range(0, len(validated_files), chunk_size):
+          chunk_files = validated_files[i:i+chunk_size]
+          if not self.memory_mgr.memory_check(f"{source_name} processing"):
+              break
+          df_chunk = self._load_file_chunk(chunk_files, source_name)
+          if df_chunk is not None and len(df_chunk) > 0:
+              chunks.append(df_chunk)
+          del df_chunk
+          self.memory_mgr.force_cleanup()
 
-        for i in range(0, len(validated_files), chunk_size):
-            chunk_files = validated_files[i:i+chunk_size]
-            if not self.memory_mgr.memory_check(f"{source_name} processing"):
-                break
-            df_chunk = self._load_file_chunk(chunk_files, source_name)
-            if df_chunk is not None and len(df_chunk) > 0:
-                chunks.append(df_chunk)
-            del df_chunk
-            self.memory_mgr.force_cleanup()
+      if chunks:
+          combined = pd.concat(chunks, ignore_index=True)
+          del chunks
+          self.memory_mgr.force_cleanup()
+          return combined
 
-        if chunks:
-            combined = pd.concat(chunks, ignore_index=True)
-            del chunks
-            self.memory_mgr.force_cleanup()
-            return combined
-
-        raise DataValidationError(f"{source_name}: No data after processing")
+      raise DataValidationError(f"{source_name}: No data after processing")
 
     def _load_file_chunk(self, file_list: List[str], source_name: str):
       dfs = []
